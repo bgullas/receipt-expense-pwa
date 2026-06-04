@@ -1,0 +1,23 @@
+{
+  "name": "receipt-expense-server",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "axios": "^1.7.7",
+    "jsonwebtoken": "^9.0.2",
+    "@anthropic-ai/sdk": "^0.32.0",
+    "node-fetch": "^2.7.0",
+    "express-session": "^1.18.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}
