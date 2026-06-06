@@ -12,8 +12,8 @@ export default defineConfig({
       manifest: {
         name: 'Receipt Expense Tracker',
         short_name: 'Expenses',
-        description: 'Capture receipts and sync to QuickBooks',
-        theme_color: '#2563eb',
+        description: 'Capture receipts and sync to Xero',
+        theme_color: '#13B5EA',
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'portrait',

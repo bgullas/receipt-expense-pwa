@@ -3,104 +3,142 @@ const axios = require('axios')
 
 const router = express.Router()
 
-const QB_AUTH_BASE = 'https://appcenter.intuit.com/connect/oauth2'
-const QB_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
-const QB_REVOKE_URL = 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke'
-const SCOPES = 'com.intuit.quickbooks.accounting'
+const XERO_AUTH_BASE  = 'https://login.xero.com/identity/connect/authorize'
+const XERO_TOKEN_URL  = 'https://identity.xero.com/connect/token'
+const XERO_REVOKE_URL = 'https://identity.xero.com/connect/revocation'
+const XERO_CONN_URL   = 'https://api.xero.com/connections'
+const SCOPES = 'openid profile email accounting.transactions accounting.contacts offline_access'
 
-// In-memory token store — replace with a DB in production
+// In-memory store — swap for a DB in production
 const tokenStore = {}
 
 function getRedirectUri(req) {
-  return `${req.protocol}://${req.get('host')}/api/auth/qb/callback`
+  return `${req.protocol}://${req.get('host')}/api/auth/xero/callback`
 }
 
-router.get('/qb/connect', (req, res) => {
+function basicAuth() {
+  return Buffer.from(
+    `${process.env.XERO_CLIENT_ID}:${process.env.XERO_CLIENT_SECRET}`
+  ).toString('base64')
+}
+
+// ── Connect ──────────────────────────────────────────────────────────────────
+router.get('/xero/connect', (req, res) => {
   const params = new URLSearchParams({
-    client_id: process.env.QB_CLIENT_ID,
-    redirect_uri: getRedirectUri(req),
     response_type: 'code',
-    scope: SCOPES,
-    state: 'blugraph-expense-app',
+    client_id:     process.env.XERO_CLIENT_ID,
+    redirect_uri:  getRedirectUri(req),
+    scope:         SCOPES,
+    state:         'blugraph-expense-app',
   })
-  res.redirect(`${QB_AUTH_BASE}?${params}`)
+  res.redirect(`${XERO_AUTH_BASE}?${params}`)
 })
 
-router.get('/qb/callback', async (req, res) => {
-  const { code, realmId } = req.query
-  if (!code || !realmId) return res.status(400).send('Missing code or realmId')
+// ── OAuth callback ────────────────────────────────────────────────────────────
+router.get('/xero/callback', async (req, res) => {
+  const { code } = req.query
+  if (!code) return res.status(400).send('Missing code')
 
   try {
-    const creds = Buffer.from(`${process.env.QB_CLIENT_ID}:${process.env.QB_CLIENT_SECRET}`).toString('base64')
-    const { data } = await axios.post(QB_TOKEN_URL,
-      new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: getRedirectUri(req) }),
-      { headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' } }
+    // Exchange code for tokens
+    const { data: tokens } = await axios.post(
+      XERO_TOKEN_URL,
+      new URLSearchParams({
+        grant_type:   'authorization_code',
+        code,
+        redirect_uri: getRedirectUri(req),
+      }),
+      {
+        headers: {
+          Authorization:  `Basic ${basicAuth()}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
     )
 
-    // Fetch company name
-    let companyName = 'My Company'
-    try {
-      const infoRes = await axios.get(
-        `${process.env.QB_API_BASE ?? 'https://quickbooks.api.intuit.com'}/v3/company/${realmId}/companyinfo/${realmId}`,
-        { headers: { Authorization: `Bearer ${data.access_token}`, Accept: 'application/json' } }
-      )
-      companyName = infoRes.data?.QueryResponse?.CompanyInfo?.[0]?.CompanyName ?? companyName
-    } catch { /* non-fatal */ }
+    // Get connected tenants (orgs)
+    const { data: connections } = await axios.get(XERO_CONN_URL, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    })
+    const tenant = connections[0] // use first connected org
 
     tokenStore.current = {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      realmId,
-      companyName,
-      expiresAt: Date.now() + data.expires_in * 1000,
+      accessToken:  tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tenantId:     tenant.tenantId,
+      orgName:      tenant.tenantName,
+      expiresAt:    Date.now() + tokens.expires_in * 1000,
     }
 
-    // Close the popup and refresh the parent
-    res.send(`<html><body><script>window.opener && window.opener.dispatchEvent(new Event('focus')); window.close();</script><p>Connected! You can close this window.</p></body></html>`)
+    // Close popup and signal the parent window
+    res.send(`
+      <html><body>
+        <script>
+          window.opener && window.opener.dispatchEvent(new Event('focus'));
+          window.close();
+        </script>
+        <p>Connected to Xero! You can close this window.</p>
+      </body></html>
+    `)
   } catch (err) {
-    console.error('QB auth error:', err.response?.data ?? err.message)
+    console.error('Xero auth error:', err.response?.data ?? err.message)
     res.status(500).send('Authentication failed. Please try again.')
   }
 })
 
-router.get('/qb/status', (req, res) => {
+// ── Status ────────────────────────────────────────────────────────────────────
+router.get('/xero/status', (req, res) => {
   if (!tokenStore.current) return res.json({ connected: false })
   res.json({
     connected: true,
-    companyName: tokenStore.current.companyName,
-    realmId: tokenStore.current.realmId,
+    orgName:   tokenStore.current.orgName,
+    tenantId:  tokenStore.current.tenantId,
   })
 })
 
-router.post('/qb/disconnect', async (req, res) => {
+// ── Disconnect ────────────────────────────────────────────────────────────────
+router.post('/xero/disconnect', async (req, res) => {
   if (!tokenStore.current) return res.json({ ok: true })
   try {
-    const creds = Buffer.from(`${process.env.QB_CLIENT_ID}:${process.env.QB_CLIENT_SECRET}`).toString('base64')
-    await axios.post(QB_REVOKE_URL,
+    await axios.post(
+      XERO_REVOKE_URL,
       new URLSearchParams({ token: tokenStore.current.refreshToken }),
-      { headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' } }
+      {
+        headers: {
+          Authorization:  `Basic ${basicAuth()}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
     )
   } catch { /* ignore revoke errors */ }
   delete tokenStore.current
   res.json({ ok: true })
 })
 
-// Middleware to refresh token if needed — call this in other routes
+// ── Token refresh helper (used by other routes) ───────────────────────────────
 async function ensureValidToken() {
   const t = tokenStore.current
-  if (!t) throw new Error('Not connected to QuickBooks')
+  if (!t) throw new Error('Not connected to Xero')
   if (Date.now() < t.expiresAt - 60_000) return t
 
-  const creds = Buffer.from(`${process.env.QB_CLIENT_ID}:${process.env.QB_CLIENT_SECRET}`).toString('base64')
-  const { data } = await axios.post(QB_TOKEN_URL,
-    new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refreshToken }),
-    { headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' } }
+  const { data } = await axios.post(
+    XERO_TOKEN_URL,
+    new URLSearchParams({
+      grant_type:    'refresh_token',
+      refresh_token: t.refreshToken,
+    }),
+    {
+      headers: {
+        Authorization:  `Basic ${basicAuth()}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    }
   )
   tokenStore.current = {
     ...t,
-    accessToken: data.access_token,
+    accessToken:  data.access_token,
     refreshToken: data.refresh_token ?? t.refreshToken,
-    expiresAt: Date.now() + data.expires_in * 1000,
+    expiresAt:    Date.now() + data.expires_in * 1000,
   }
   return tokenStore.current
 }

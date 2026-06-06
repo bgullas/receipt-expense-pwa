@@ -3,8 +3,8 @@ import { Receipt, List, Settings } from 'lucide-react'
 import CameraCapture from './components/CameraCapture'
 import ReceiptForm from './components/ReceiptForm'
 import ExpenseList from './components/ExpenseList'
-import QuickBooksConnect from './components/QuickBooksConnect'
-import { extractReceiptData, submitExpenseToQB } from './services/api'
+import XeroConnect from './components/XeroConnect'
+import { extractReceiptData, submitExpenseToXero } from './services/api'
 import { useLocalStorage } from './hooks/useLocalStorage'
 import type { Expense, ExtractedExpense } from './types'
 
@@ -53,18 +53,20 @@ export default function App() {
     setIsSubmitting(true)
 
     try {
-      const result = await submitExpenseToQB(expense)
+      const result = await submitExpenseToXero(expense)
       setExpenses(prev =>
-        prev.map(e => e.id === expense.id
-          ? { ...e, status: 'synced', qbPurchaseId: result.purchaseId, syncedAt: new Date().toISOString() }
-          : e
+        prev.map(e =>
+          e.id === expense.id
+            ? { ...e, status: 'synced', xeroPurchaseId: result.purchaseId, syncedAt: new Date().toISOString() }
+            : e
         )
       )
     } catch (err) {
       setExpenses(prev =>
-        prev.map(e => e.id === expense.id
-          ? { ...e, status: 'error', errorMessage: err instanceof Error ? err.message : 'Sync failed' }
-          : e
+        prev.map(e =>
+          e.id === expense.id
+            ? { ...e, status: 'error', errorMessage: err instanceof Error ? err.message : 'Sync failed' }
+            : e
         )
       )
     } finally {
@@ -92,12 +94,12 @@ export default function App() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-20">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
+          <div className="w-9 h-9 bg-[#13B5EA] rounded-xl flex items-center justify-center">
             <Receipt size={20} className="text-white" />
           </div>
           <div>
             <h1 className="font-bold text-gray-900 leading-tight">Expense Tracker</h1>
-            <p className="text-xs text-gray-500">Powered by QuickBooks</p>
+            <p className="text-xs text-gray-500">Powered by Xero</p>
           </div>
         </div>
       </header>
@@ -110,7 +112,7 @@ export default function App() {
               <>
                 <div className="text-center">
                   <h2 className="text-xl font-bold text-gray-900">Capture Receipt</h2>
-                  <p className="text-sm text-gray-500 mt-1">Take a photo or upload an image — AI will extract the details</p>
+                  <p className="text-sm text-gray-500 mt-1">Take a photo or upload — AI will extract the details</p>
                 </div>
                 {processingError && (
                   <div className="w-full max-w-sm px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
@@ -131,7 +133,7 @@ export default function App() {
                   />
                 )}
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-10 h-10 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+                  <div className="w-10 h-10 border-4 border-[#13B5EA]/30 border-t-[#13B5EA] rounded-full animate-spin" />
                   <p className="font-semibold text-gray-800">Analysing receipt…</p>
                   <p className="text-sm text-gray-500">AI is extracting expense details</p>
                 </div>
@@ -175,8 +177,8 @@ export default function App() {
           <div className="flex flex-col gap-6">
             <h2 className="text-xl font-bold text-gray-900">Settings</h2>
             <section className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">QuickBooks</h3>
-              <QuickBooksConnect />
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Xero</h3>
+              <XeroConnect />
             </section>
             <section className="flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Data</h3>
@@ -208,15 +210,22 @@ export default function App() {
       <nav className="bg-white border-t border-gray-200 px-4 py-2 sticky bottom-0 z-20">
         <div className="flex">
           {([
-            { id: 'capture', icon: Receipt, label: 'Capture' },
-            { id: 'history', icon: List,    label: 'History' },
+            { id: 'capture',  icon: Receipt,  label: 'Capture' },
+            { id: 'history',  icon: List,     label: 'History' },
             { id: 'settings', icon: Settings, label: 'Settings' },
           ] as const).map(({ id, icon: Icon, label }) => (
             <button
               key={id}
-              onClick={() => { setTab(id); if (id === 'capture') { setStep('camera'); setCurrentImage(null); setCurrentData(null) } }}
+              onClick={() => {
+                setTab(id)
+                if (id === 'capture') {
+                  setStep('camera')
+                  setCurrentImage(null)
+                  setCurrentData(null)
+                }
+              }}
               className={`flex-1 flex flex-col items-center gap-1 py-2 transition-colors ${
-                tab === id ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'
+                tab === id ? 'text-[#13B5EA]' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
               <Icon size={22} strokeWidth={tab === id ? 2.5 : 1.8} />

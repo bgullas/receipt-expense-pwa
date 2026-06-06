@@ -53,9 +53,9 @@ export default function ExpenseList({ expenses, onDelete }: Props) {
                 <div className={`inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
                   <Icon size={11} />
                   {cfg.label}
-                  {exp.status === 'synced' && exp.qbPurchaseId && (
+                  {exp.status === 'synced' && exp.xeroPurchaseId && (
                     <a
-                      href={`https://qbo.intuit.com/app/expense?txnId=${exp.qbPurchaseId}`}
+                      href={`https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=${exp.xeroPurchaseId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="ml-1 hover:opacity-70"

@@ -26,19 +26,19 @@ export interface Expense {
   receiptImage?: string
   extracted: ExtractedExpense
   status: ExpenseStatus
-  qbPurchaseId?: string
+  xeroPurchaseId?: string
   createdAt: string
   syncedAt?: string
   errorMessage?: string
 }
 
-export interface QBConnection {
+export interface XeroConnection {
   connected: boolean
-  companyName?: string
-  realmId?: string
+  orgName?: string
+  tenantId?: string
 }
 
-export const QB_CATEGORIES = [
+export const EXPENSE_CATEGORIES = [
   'Advertising',
   'Auto',
   'Bank Charges',

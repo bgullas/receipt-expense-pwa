@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Send, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type { ExtractedExpense, LineItem } from '../types'
-import { QB_CATEGORIES, PAYMENT_METHODS } from '../types'
+import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from '../types'
 
 interface Props {
   data: ExtractedExpense
@@ -107,7 +107,7 @@ export default function ReceiptForm({ data, onSubmit, onCancel, isSubmitting }: 
             onChange={e => update('category', e.target.value)}
             className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
           >
-            {QB_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            {EXPENSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
           </select>
         )}
         {field('Payment Method',
@@ -193,7 +193,7 @@ export default function ReceiptForm({ data, onSubmit, onCancel, isSubmitting }: 
           {isSubmitting ? (
             <span className="flex items-center gap-2"><span className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full" /> Sending…</span>
           ) : (
-            <><Send size={18} /> Send to QuickBooks</>
+            <><Send size={18} /> Send to Xero</>
           )}
         </button>
       </div>

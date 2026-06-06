@@ -21,21 +21,21 @@ export async function extractReceiptData(imageBase64: string): Promise<Extracted
   })
 }
 
-export async function submitExpenseToQB(expense: Expense): Promise<{ purchaseId: string }> {
+export async function submitExpenseToXero(expense: Expense): Promise<{ purchaseId: string }> {
   return request('/expenses/submit', {
     method: 'POST',
     body: JSON.stringify({ expense }),
   })
 }
 
-export async function getQBConnectionStatus(): Promise<{ connected: boolean; companyName?: string; realmId?: string }> {
-  return request('/auth/qb/status')
+export async function getXeroConnectionStatus(): Promise<{ connected: boolean; orgName?: string; tenantId?: string }> {
+  return request('/auth/xero/status')
 }
 
-export function getQBAuthUrl(): string {
-  return `${BASE}/auth/qb/connect`
+export function getXeroAuthUrl(): string {
+  return `${BASE}/auth/xero/connect`
 }
 
-export async function disconnectQB(): Promise<void> {
-  return request('/auth/qb/disconnect', { method: 'POST' })
+export async function disconnectXero(): Promise<void> {
+  return request('/auth/xero/disconnect', { method: 'POST' })
 }
