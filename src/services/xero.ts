@@ -1,17 +1,21 @@
 /**
  * Xero OAuth 2.0 PKCE flow + API calls — runs entirely in the browser.
  * No backend / client secret needed.
+ *
+ * NOTE on Xero OCR: Xero's receipt scanning is a UI-only feature in their
+ * mobile app and is not exposed via their REST API. We use Claude vision for
+ * OCR and attach the receipt image to the Xero transaction after creation.
  */
 
-const XERO_AUTH_BASE  = 'https://login.xero.com/identity/connect/authorize'
-const XERO_TOKEN_URL  = 'https://identity.xero.com/connect/token'
-const XERO_CONN_URL   = 'https://api.xero.com/connections'
-const XERO_API        = 'https://api.xero.com/api.xro/2.0'
+const XERO_AUTH_BASE = 'https://login.xero.com/identity/connect/authorize'
+const XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
+const XERO_CONN_URL  = 'https://api.xero.com/connections'
+const XERO_API       = 'https://api.xero.com/api.xro/2.0'
 const SCOPES = 'openid profile email accounting.transactions accounting.contacts offline_access'
 
 const REDIRECT_URI = `${window.location.origin}${import.meta.env.BASE_URL}`
 
-// ── Storage keys ─────────────────────────────────────────────────────────────
+// ── Storage keys ──────────────────────────────────────────────────────────────
 const KEYS = {
   accessToken:  'xero_access_token',
   refreshToken: 'xero_refresh_token',
@@ -20,6 +24,16 @@ const KEYS = {
   orgName:      'xero_org_name',
   verifier:     'xero_pkce_verifier',
   clientId:     'xero_client_id',
+  accounts:     'xero_accounts_cache',
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+export interface XeroAccount {
+  AccountID:   string
+  Code:        string
+  Name:        string
+  Type:        string
+  Description: string
 }
 
 // ── PKCE helpers ──────────────────────────────────────────────────────────────
@@ -31,24 +45,17 @@ function randomBase64Url(len = 64): string {
 }
 
 async function sha256Base64Url(plain: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(plain)
+  const data = new TextEncoder().encode(plain)
   const digest = await crypto.subtle.digest('SHA-256', data)
   return btoa(String.fromCharCode(...new Uint8Array(digest)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Client ID ─────────────────────────────────────────────────────────────────
+export function getClientId()          { return localStorage.getItem(KEYS.clientId) ?? '' }
+export function setClientId(id: string) { localStorage.setItem(KEYS.clientId, id) }
 
-export function getClientId(): string {
-  return localStorage.getItem(KEYS.clientId) ?? ''
-}
-
-export function setClientId(id: string) {
-  localStorage.setItem(KEYS.clientId, id)
-}
-
-/** Redirect the browser to Xero's login/consent page */
+// ── Auth ──────────────────────────────────────────────────────────────────────
 export async function startXeroAuth() {
   const clientId = getClientId()
   if (!clientId) throw new Error('Xero Client ID not set — add it in Settings first')
@@ -69,7 +76,6 @@ export async function startXeroAuth() {
   window.location.href = `${XERO_AUTH_BASE}?${params}`
 }
 
-/** Call this on page load if ?code= is in the URL (OAuth callback) */
 export async function handleXeroCallback(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search)
   const code   = params.get('code')
@@ -79,25 +85,20 @@ export async function handleXeroCallback(): Promise<boolean> {
   const verifier = sessionStorage.getItem(KEYS.verifier)
   if (!verifier) throw new Error('PKCE verifier missing — please try connecting again')
 
-  const clientId = getClientId()
-
-  const body = new URLSearchParams({
-    grant_type:    'authorization_code',
-    code,
-    redirect_uri:  REDIRECT_URI,
-    client_id:     clientId,
-    code_verifier: verifier,
-  })
-
   const res = await fetch(XERO_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    body: new URLSearchParams({
+      grant_type:    'authorization_code',
+      code,
+      redirect_uri:  REDIRECT_URI,
+      client_id:     getClientId(),
+      code_verifier: verifier,
+    }),
   })
   if (!res.ok) throw new Error('Token exchange failed — please try again')
   const tokens = await res.json()
 
-  // Get the connected tenant (organisation)
   const connRes = await fetch(XERO_CONN_URL, {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   })
@@ -111,7 +112,6 @@ export async function handleXeroCallback(): Promise<boolean> {
   localStorage.setItem(KEYS.orgName,      tenant.tenantName)
   sessionStorage.removeItem(KEYS.verifier)
 
-  // Clean the URL so the code doesn't linger
   window.history.replaceState({}, '', window.location.pathname)
   return true
 }
@@ -121,8 +121,8 @@ export function getXeroStatus(): { connected: boolean; orgName?: string; tenantI
   if (!token) return { connected: false }
   return {
     connected: true,
-    orgName:   localStorage.getItem(KEYS.orgName) ?? undefined,
-    tenantId:  localStorage.getItem(KEYS.tenantId) ?? undefined,
+    orgName:  localStorage.getItem(KEYS.orgName)  ?? undefined,
+    tenantId: localStorage.getItem(KEYS.tenantId) ?? undefined,
   }
 }
 
@@ -131,12 +131,12 @@ export function disconnectXero() {
   sessionStorage.removeItem(KEYS.verifier)
 }
 
+// ── Token management ──────────────────────────────────────────────────────────
 async function getValidToken(): Promise<{ accessToken: string; tenantId: string }> {
   const expiresAt = Number(localStorage.getItem(KEYS.expiresAt) ?? 0)
   let accessToken = localStorage.getItem(KEYS.accessToken) ?? ''
 
   if (Date.now() > expiresAt - 60_000) {
-    // Refresh
     const refreshToken = localStorage.getItem(KEYS.refreshToken)
     if (!refreshToken) throw new Error('Not connected to Xero')
     const res = await fetch(XERO_TOKEN_URL, {
@@ -148,7 +148,7 @@ async function getValidToken(): Promise<{ accessToken: string; tenantId: string 
         client_id:     getClientId(),
       }),
     })
-    if (!res.ok) throw new Error('Xero session expired — please reconnect')
+    if (!res.ok) throw new Error('Xero session expired — please reconnect in Settings')
     const tokens = await res.json()
     accessToken = tokens.access_token
     localStorage.setItem(KEYS.accessToken,  accessToken)
@@ -156,113 +156,138 @@ async function getValidToken(): Promise<{ accessToken: string; tenantId: string 
     localStorage.setItem(KEYS.expiresAt,    String(Date.now() + tokens.expires_in * 1000))
   }
 
-  return {
-    accessToken,
-    tenantId: localStorage.getItem(KEYS.tenantId) ?? '',
-  }
+  return { accessToken, tenantId: localStorage.getItem(KEYS.tenantId) ?? '' }
 }
 
-function xeroHeaders(token: { accessToken: string; tenantId: string }) {
+function xeroHeaders(token: { accessToken: string; tenantId: string }, contentType = 'application/json') {
   return {
     Authorization:    `Bearer ${token.accessToken}`,
     'Xero-Tenant-Id': token.tenantId,
-    'Content-Type':   'application/json',
+    'Content-Type':   contentType,
     Accept:           'application/json',
   }
 }
 
-const CATEGORY_TO_ACCOUNT_CODE: Record<string, string> = {
-  'Advertising':             '404',
-  'Auto':                    '449',
-  'Bank Charges':            '404',
-  'Entertainment':           '420',
-  'Equipment':               '404',
-  'Insurance':               '478',
-  'Meals':                   '420',
-  'Office Supplies':         '460',
-  'Other Business Expenses': '404',
-  'Professional Fees':       '404',
-  'Rent':                    '469',
-  'Software':                '460',
-  'Travel':                  '493',
-  'Utilities':               '477',
+// ── Chart of accounts ─────────────────────────────────────────────────────────
+/** Returns expense-class accounts from Xero, cached in localStorage for 24h */
+export async function getExpenseAccounts(): Promise<XeroAccount[]> {
+  const cached = localStorage.getItem(KEYS.accounts)
+  if (cached) {
+    const { ts, data } = JSON.parse(cached)
+    // cache valid for 24 hours
+    if (Date.now() - ts < 24 * 60 * 60 * 1000) return data
+  }
+
+  const token = await getValidToken()
+  const res = await fetch(
+    `${XERO_API}/Accounts?where=Class%3D%3D%22EXPENSE%22&order=Name`,
+    { headers: xeroHeaders(token) }
+  )
+  if (!res.ok) throw new Error('Could not load Xero accounts')
+  const data = await res.json()
+  const accounts: XeroAccount[] = data?.Accounts ?? []
+  localStorage.setItem(KEYS.accounts, JSON.stringify({ ts: Date.now(), data: accounts }))
+  return accounts
 }
 
-export async function submitExpenseToXero(extracted: import('../types').ExtractedExpense): Promise<string> {
+// ── Submit expense ────────────────────────────────────────────────────────────
+export async function submitExpenseToXero(
+  extracted: import('../types').ExtractedExpense,
+  accountId: string,
+  imageBase64?: string,
+): Promise<string> {
   const token = await getValidToken()
-  const accountCode = CATEGORY_TO_ACCOUNT_CODE[extracted.category] ?? '404'
-  const headers = xeroHeaders(token)
+  const h = xeroHeaders(token)
 
-  // Find or create contact
+  // 1. Find or create contact (vendor)
   let contactId: string | undefined
   try {
+    const vendor = extracted.vendor.replace(/"/g, '\\"')
     const r = await fetch(
-      `${XERO_API}/Contacts?where=Name%3D%3D%22${encodeURIComponent(extracted.vendor)}%22`,
-      { headers }
+      `${XERO_API}/Contacts?where=Name%3D%3D%22${encodeURIComponent(vendor)}%22`,
+      { headers: h }
     )
-    const data = await r.json()
-    contactId = data?.Contacts?.[0]?.ContactID
+    const d = await r.json()
+    contactId = d?.Contacts?.[0]?.ContactID
     if (!contactId) {
       const cr = await fetch(`${XERO_API}/Contacts`, {
-        method: 'POST',
-        headers,
+        method: 'POST', headers: h,
         body: JSON.stringify({ Contacts: [{ Name: extracted.vendor || 'Unknown Vendor' }] }),
       })
-      const cd = await cr.json()
-      contactId = cd?.Contacts?.[0]?.ContactID
+      contactId = (await cr.json())?.Contacts?.[0]?.ContactID
     }
   } catch { /* proceed without contact */ }
 
-  // Find a bank/credit card account
+  // 2. Find a bank/card account to debit
   let bankAccountId: string | undefined
   try {
-    const r = await fetch(`${XERO_API}/Accounts?where=Type%3D%3D%22BANK%22`, { headers })
-    const data = await r.json()
-    const accounts = data?.Accounts ?? []
-    const isCreditCard = extracted.paymentMethod === 'Credit Card'
+    const r = await fetch(`${XERO_API}/Accounts?where=Type%3D%3D%22BANK%22`, { headers: h })
+    const d = await r.json()
+    const accounts = d?.Accounts ?? []
+    const isCard = extracted.paymentMethod === 'Credit Card'
     bankAccountId =
-      accounts.find((a: { BankAccountType: string; AccountID: string }) =>
-        isCreditCard ? a.BankAccountType === 'CREDITCARD' : a.BankAccountType !== 'CREDITCARD'
+      accounts.find((a: { BankAccountType: string }) =>
+        isCard ? a.BankAccountType === 'CREDITCARD' : a.BankAccountType !== 'CREDITCARD'
       )?.AccountID ?? accounts[0]?.AccountID
   } catch { /* use Xero default */ }
 
+  // 3. Build line items using the selected account
   const lineItems = extracted.lineItems.length > 0
     ? extracted.lineItems.map(item => ({
         Description: item.description,
         Quantity:    item.quantity,
         UnitAmount:  item.unitPrice,
-        AccountCode: accountCode,
+        AccountID:   accountId,
         TaxType:     'NONE',
       }))
     : [{
-        Description: extracted.vendor || extracted.category || 'Expense',
+        Description: extracted.vendor || extracted.notes || 'Expense',
         Quantity:    1,
         UnitAmount:  extracted.subtotal || extracted.total,
-        AccountCode: accountCode,
+        AccountID:   accountId,
         TaxType:     'NONE',
       }]
 
-  const payload = {
-    BankTransactions: [{
-      Type:      'SPEND',
-      Date:      extracted.date,
-      Reference: extracted.notes || extracted.category,
-      ...(contactId     && { Contact: { ContactID: contactId } }),
-      ...(bankAccountId && { BankAccount: { AccountID: bankAccountId } }),
-      LineItems: lineItems,
-    }],
-  }
-
+  // 4. Create BankTransaction (SPEND)
   const res = await fetch(`${XERO_API}/BankTransactions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
+    method: 'POST', headers: h,
+    body: JSON.stringify({
+      BankTransactions: [{
+        Type:      'SPEND',
+        Date:      extracted.date,
+        Reference: extracted.notes || extracted.vendor || '',
+        ...(contactId     && { Contact:     { ContactID: contactId } }),
+        ...(bankAccountId && { BankAccount: { AccountID: bankAccountId } }),
+        LineItems: lineItems,
+      }],
+    }),
   })
   if (!res.ok) {
     const err = await res.json()
-    const msg = err?.Elements?.[0]?.ValidationErrors?.[0]?.Message ?? 'Submission failed'
-    throw new Error(msg)
+    throw new Error(
+      err?.Elements?.[0]?.ValidationErrors?.[0]?.Message ?? 'Xero submission failed'
+    )
   }
-  const data = await res.json()
-  return data?.BankTransactions?.[0]?.BankTransactionID ?? 'unknown'
+  const txnId = (await res.json())?.BankTransactions?.[0]?.BankTransactionID
+
+  // 5. Attach receipt image to the transaction
+  if (imageBase64 && txnId) {
+    try {
+      const binary = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0))
+      await fetch(
+        `${XERO_API}/BankTransactions/${txnId}/Attachments/receipt.jpg`,
+        {
+          method:  'PUT',
+          headers: {
+            Authorization:    `Bearer ${token.accessToken}`,
+            'Xero-Tenant-Id': token.tenantId,
+            'Content-Type':   'image/jpeg',
+          },
+          body: binary,
+        }
+      )
+    } catch { /* attachment failure is non-fatal */ }
+  }
+
+  return txnId ?? 'unknown'
 }
