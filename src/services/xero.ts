@@ -62,9 +62,10 @@ export function getClientId(): string {
 export function setClientId(id: string) { localStorage.setItem(KEYS.clientId, id) }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-export async function startXeroAuth() {
+/** Returns the full OAuth URL that will be used — for debugging/display */
+export async function buildXeroAuthUrl(): Promise<{ url: string; clientId: string; redirectUri: string }> {
   const clientId = getClientId()
-  if (!clientId) throw new Error('Xero Client ID not set — add it in Settings first')
+  if (!clientId) throw new Error('Xero Client ID not configured')
 
   const verifier  = randomBase64Url()
   const challenge = await sha256Base64Url(verifier)
@@ -80,11 +81,18 @@ export async function startXeroAuth() {
     code_challenge_method: 'S256',
   })
 
-  // Log for debugging — check console if Xero shows an error
-  console.debug('[Xero OAuth] client_id:', clientId)
-  console.debug('[Xero OAuth] redirect_uri:', REDIRECT_URI)
+  return {
+    url:         `${XERO_AUTH_BASE}?${params}`,
+    clientId,
+    redirectUri: REDIRECT_URI,
+  }
+}
 
-  window.location.href = `${XERO_AUTH_BASE}?${params}`
+export async function startXeroAuth() {
+  const { url, clientId, redirectUri } = await buildXeroAuthUrl()
+  console.debug('[Xero OAuth] client_id   :', clientId)
+  console.debug('[Xero OAuth] redirect_uri:', redirectUri)
+  window.location.href = url
 }
 
 export async function handleXeroCallback(): Promise<boolean> {

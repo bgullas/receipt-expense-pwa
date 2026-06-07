@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle, Link, Unlink, Loader, AlertCircle } from 'lucide-react'
+import { CheckCircle, Link, Unlink, Loader, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   startXeroAuth,
   getXeroStatus,
@@ -8,18 +8,20 @@ import {
   handleXeroCallback,
 } from '../services/xero'
 
-const HAS_BUILT_IN_CLIENT_ID = Boolean(import.meta.env.VITE_XERO_CLIENT_ID)
-
 interface Props {
   onConnected?: () => void
 }
 
 export default function XeroConnect({ onConnected }: Props) {
-  const [status, setStatus] = useState(getXeroStatus)
+  const [status, setStatus]   = useState(getXeroStatus)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]     = useState<string | null>(null)
+  const [showDebug, setShowDebug] = useState(false)
 
-  // Handle OAuth callback on mount (Xero redirects back with ?code=)
+  const clientId   = getClientId()
+  const redirectUri = 'https://bgullas.github.io/receipt-expense-pwa/'
+
+  // Handle OAuth callback on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('code') && params.get('state') === 'xero-auth') {
@@ -29,10 +31,16 @@ export default function XeroConnect({ onConnected }: Props) {
         .catch(e => setError(e.message))
         .finally(() => setLoading(false))
     }
+    // Surface Xero error params in the URL (e.g. error=unauthorized_client)
+    const urlError = params.get('error')
+    const urlErrorDesc = params.get('error_description')
+    if (urlError) {
+      setError(`Xero error: ${urlError}${urlErrorDesc ? ` — ${urlErrorDesc}` : ''}`)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
   }, [onConnected])
 
   const handleConnect = async () => {
-    if (!getClientId()) { setError('No Xero Client ID configured'); return }
     setError(null)
     try { await startXeroAuth() } catch (e) { setError((e as Error).message) }
   }
@@ -59,28 +67,57 @@ export default function XeroConnect({ onConnected }: Props) {
   )
 
   return (
-    <div className="flex flex-col gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200">
-      <p className="text-sm text-blue-800 font-medium">
-        Connect your Xero account to automatically sync expenses.
-      </p>
+    <div className="flex flex-col gap-3">
 
+      {/* Error banner */}
       {error && (
-        <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <AlertCircle size={13} /> {error}
+        <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+          <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Connection failed</p>
+            <p className="text-xs mt-0.5">{error}</p>
+          </div>
         </div>
       )}
 
+      {/* Connect card */}
+      <div className="flex flex-col gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200">
+        <p className="text-sm text-blue-800 font-medium">
+          Connect your Xero account to automatically sync expenses.
+        </p>
+        <button
+          onClick={handleConnect}
+          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#13B5EA] text-white font-semibold hover:bg-[#0fa8db] transition-colors"
+        >
+          <Link size={18} /> Connect Xero
+        </button>
+      </div>
+
+      {/* Debug inspector */}
       <button
-        onClick={handleConnect}
-        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#13B5EA] text-white font-semibold hover:bg-[#0fa8db] transition-colors"
+        type="button"
+        onClick={() => setShowDebug(v => !v)}
+        className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 mx-auto"
       >
-        <Link size={18} /> Connect Xero
+        {showDebug ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        Connection details
       </button>
 
-      {HAS_BUILT_IN_CLIENT_ID && (
-        <p className="text-xs text-blue-600 text-center">
-          Blugraph app · ready to authorise
-        </p>
+      {showDebug && (
+        <div className="bg-gray-900 rounded-xl p-4 flex flex-col gap-2 text-xs font-mono">
+          <div>
+            <span className="text-gray-400">client_id</span>
+            <p className="text-green-400 break-all mt-0.5">{clientId || '(not set)'}</p>
+          </div>
+          <div>
+            <span className="text-gray-400">redirect_uri</span>
+            <p className="text-green-400 break-all mt-0.5">{redirectUri}</p>
+          </div>
+          <div className="mt-1 pt-2 border-t border-gray-700 text-gray-400">
+            Verify both values match exactly in<br />
+            <span className="text-yellow-400">developer.xero.com → your app → Configuration</span>
+          </div>
+        </div>
       )}
     </div>
   )
