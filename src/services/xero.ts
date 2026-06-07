@@ -52,7 +52,11 @@ async function sha256Base64Url(plain: string): Promise<string> {
 }
 
 // ── Client ID ─────────────────────────────────────────────────────────────────
-export function getClientId()          { return localStorage.getItem(KEYS.clientId) ?? '' }
+const BUILT_IN_CLIENT_ID = import.meta.env.VITE_XERO_CLIENT_ID ?? ''
+
+export function getClientId(): string {
+  return localStorage.getItem(KEYS.clientId) || BUILT_IN_CLIENT_ID
+}
 export function setClientId(id: string) { localStorage.setItem(KEYS.clientId, id) }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
