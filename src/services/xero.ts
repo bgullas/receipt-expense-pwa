@@ -63,13 +63,29 @@ async function sha256Base64Url(plain: string): Promise<string> {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
-// ── Client ID ─────────────────────────────────────────────────────────────────
-const BUILT_IN_CLIENT_ID = import.meta.env.VITE_XERO_CLIENT_ID ?? ''
+// ── Credentials ───────────────────────────────────────────────────────────────
+const BUILT_IN_CLIENT_ID     = import.meta.env.VITE_XERO_CLIENT_ID     ?? ''
+const BUILT_IN_CLIENT_SECRET = import.meta.env.VITE_XERO_CLIENT_SECRET ?? ''
 
 export function getClientId(): string {
   return localStorage.getItem(KEYS.clientId) || BUILT_IN_CLIENT_ID
 }
 export function setClientId(id: string) { localStorage.setItem(KEYS.clientId, id) }
+
+function getBasicAuth(): string {
+  const id     = getClientId()
+  const secret = BUILT_IN_CLIENT_SECRET
+  return btoa(`${id}:${secret}`)
+}
+
+function tokenHeaders(useBasicAuth: boolean): HeadersInit {
+  return {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    ...(useBasicAuth && BUILT_IN_CLIENT_SECRET
+      ? { Authorization: `Basic ${getBasicAuth()}` }
+      : {}),
+  }
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 /** Returns the full OAuth URL that will be used — for debugging/display */
@@ -116,7 +132,7 @@ export async function handleXeroCallback(): Promise<boolean> {
 
   const res = await fetch(XERO_TOKEN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: tokenHeaders(true),
     body: new URLSearchParams({
       grant_type:    'authorization_code',
       code,
@@ -125,7 +141,10 @@ export async function handleXeroCallback(): Promise<boolean> {
       code_verifier: verifier,
     }),
   })
-  if (!res.ok) throw new Error('Token exchange failed — please try again')
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(`Token exchange failed: ${errBody?.error_description ?? res.status}`)
+  }
   const tokens = await res.json()
 
   const connRes = await fetch(XERO_CONN_URL, {
@@ -170,7 +189,7 @@ async function getValidToken(): Promise<{ accessToken: string; tenantId: string 
     if (!refreshToken) throw new Error('Not connected to Xero')
     const res = await fetch(XERO_TOKEN_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: tokenHeaders(true),
       body: new URLSearchParams({
         grant_type:    'refresh_token',
         refresh_token: refreshToken,
