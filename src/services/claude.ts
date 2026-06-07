@@ -8,8 +8,10 @@ const MODEL = 'claude-opus-4-8'
 
 export const ANTHROPIC_KEY_STORAGE = 'anthropic_api_key'
 
+const BUILT_IN_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY ?? ''
+
 export function getAnthropicKey(): string {
-  return localStorage.getItem(ANTHROPIC_KEY_STORAGE) ?? ''
+  return localStorage.getItem(ANTHROPIC_KEY_STORAGE) || BUILT_IN_KEY
 }
 
 export function setAnthropicKey(key: string) {

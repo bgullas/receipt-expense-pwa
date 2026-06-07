@@ -200,28 +200,35 @@ export default function App() {
 
             <section className="flex flex-col gap-3">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">AI — Receipt Scanning</h3>
-              <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-3">
-                <p className="text-sm text-gray-600">
-                  Anthropic API key for AI receipt scanning.
-                  Get one at{' '}
-                  <span className="font-semibold text-[#13B5EA]">console.anthropic.com</span>
-                </p>
-                <input
-                  type="password"
-                  value={anthropicKey}
-                  onChange={e => {
-                    setAnthropicKeyState(e.target.value)
-                    setAnthropicKey(e.target.value)
-                    localStorage.setItem(ANTHROPIC_KEY_STORAGE, e.target.value)
-                  }}
-                  placeholder="sk-ant-..."
-                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#13B5EA]"
-                />
-                {anthropicKey
-                  ? <p className="text-xs text-green-600 font-medium">✓ API key saved locally on this device</p>
-                  : <p className="text-xs text-amber-600">No key set — receipt scanning won't work</p>
-                }
-              </div>
+              {import.meta.env.VITE_ANTHROPIC_API_KEY ? (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-green-50 border border-green-200">
+                  <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                  <p className="text-sm font-medium text-green-800">AI receipt scanning ready</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-3">
+                  <p className="text-sm text-gray-600">
+                    Anthropic API key for AI receipt scanning.
+                    Get one at{' '}
+                    <span className="font-semibold text-[#13B5EA]">console.anthropic.com</span>
+                  </p>
+                  <input
+                    type="password"
+                    value={anthropicKey}
+                    onChange={e => {
+                      setAnthropicKeyState(e.target.value)
+                      setAnthropicKey(e.target.value)
+                      localStorage.setItem(ANTHROPIC_KEY_STORAGE, e.target.value)
+                    }}
+                    placeholder="sk-ant-..."
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#13B5EA]"
+                  />
+                  {anthropicKey
+                    ? <p className="text-xs text-green-600 font-medium">✓ API key saved locally</p>
+                    : <p className="text-xs text-amber-600">No key set — receipt scanning won't work</p>
+                  }
+                </div>
+              )}
             </section>
 
             <section className="flex flex-col gap-3">
