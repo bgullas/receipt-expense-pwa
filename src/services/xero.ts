@@ -13,7 +13,9 @@ const XERO_CONN_URL  = 'https://api.xero.com/connections'
 const XERO_API       = 'https://api.xero.com/api.xro/2.0'
 const SCOPES = 'openid profile email accounting.transactions accounting.contacts offline_access'
 
-const REDIRECT_URI = `${window.location.origin}${import.meta.env.BASE_URL}`
+// Hardcoded to avoid any dynamic-construction mismatches.
+// Must match EXACTLY what is registered in developer.xero.com → your app → Redirect URIs.
+const REDIRECT_URI = 'https://bgullas.github.io/receipt-expense-pwa/'
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 const KEYS = {
@@ -77,6 +79,11 @@ export async function startXeroAuth() {
     code_challenge:        challenge,
     code_challenge_method: 'S256',
   })
+
+  // Log for debugging — check console if Xero shows an error
+  console.debug('[Xero OAuth] client_id:', clientId)
+  console.debug('[Xero OAuth] redirect_uri:', REDIRECT_URI)
+
   window.location.href = `${XERO_AUTH_BASE}?${params}`
 }
 
