@@ -73,19 +73,17 @@ export function getClientId(): string {
 }
 export function setClientId(id: string) { localStorage.setItem(KEYS.clientId, id) }
 
-function getBasicAuth(): string {
-  const id     = getClientId()
-  const secret = BUILT_IN_CLIENT_SECRET
-  return btoa(`${id}:${secret}`)
+// Use client_secret_post method (body params) instead of client_secret_basic (header)
+// This avoids CORS preflight issues when calling the token endpoint from the browser
+function tokenBody(params: Record<string, string>): URLSearchParams {
+  const body = new URLSearchParams(params)
+  body.set('client_id', getClientId())
+  if (BUILT_IN_CLIENT_SECRET) body.set('client_secret', BUILT_IN_CLIENT_SECRET)
+  return body
 }
 
-function tokenHeaders(useBasicAuth: boolean): HeadersInit {
-  return {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    ...(useBasicAuth && BUILT_IN_CLIENT_SECRET
-      ? { Authorization: `Basic ${getBasicAuth()}` }
-      : {}),
-  }
+const TOKEN_HEADERS: HeadersInit = {
+  'Content-Type': 'application/x-www-form-urlencoded',
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -133,12 +131,11 @@ export async function handleXeroCallback(): Promise<boolean> {
 
   const res = await fetch(XERO_TOKEN_URL, {
     method: 'POST',
-    headers: tokenHeaders(true),
-    body: new URLSearchParams({
+    headers: TOKEN_HEADERS,
+    body: tokenBody({
       grant_type:    'authorization_code',
       code,
       redirect_uri:  REDIRECT_URI,
-      client_id:     getClientId(),
       code_verifier: verifier,
     }),
   })
@@ -190,11 +187,10 @@ async function getValidToken(): Promise<{ accessToken: string; tenantId: string 
     if (!refreshToken) throw new Error('Not connected to Xero')
     const res = await fetch(XERO_TOKEN_URL, {
       method: 'POST',
-      headers: tokenHeaders(true),
-      body: new URLSearchParams({
+      headers: TOKEN_HEADERS,
+      body: tokenBody({
         grant_type:    'refresh_token',
         refresh_token: refreshToken,
-        client_id:     getClientId(),
       }),
     })
     if (!res.ok) throw new Error('Xero session expired — please reconnect in Settings')
