@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Receipt, List, Settings } from 'lucide-react'
 import CameraCapture from './components/CameraCapture'
 import ReceiptForm from './components/ReceiptForm'
 import ExpenseList from './components/ExpenseList'
 import XeroConnect from './components/XeroConnect'
-import { extractReceiptData, submitExpenseToXero } from './services/api'
+import { extractReceiptWithClaude, getAnthropicKey, setAnthropicKey, ANTHROPIC_KEY_STORAGE } from './services/claude'
+import { submitExpenseToXero, handleXeroCallback } from './services/xero'
 import { useLocalStorage } from './hooks/useLocalStorage'
 import type { Expense, ExtractedExpense } from './types'
 
@@ -16,21 +17,29 @@ function generateId() {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('capture')
-  const [step, setStep] = useState<CaptureStep>('camera')
+  const [tab, setTab]                   = useState<Tab>('capture')
+  const [step, setStep]                 = useState<CaptureStep>('camera')
   const [currentImage, setCurrentImage] = useState<string | null>(null)
-  const [currentData, setCurrentData] = useState<ExtractedExpense | null>(null)
+  const [currentData, setCurrentData]   = useState<ExtractedExpense | null>(null)
   const [processingError, setProcessingError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [anthropicKey, setAnthropicKeyState] = useState(getAnthropicKey)
+  const [expenses, setExpenses]         = useLocalStorage<Expense[]>('expenses', [])
 
-  const [expenses, setExpenses] = useLocalStorage<Expense[]>('expenses', [])
+  // Handle Xero OAuth callback when app loads with ?code= in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('code') && params.get('state') === 'xero-auth') {
+      handleXeroCallback().catch(console.error)
+    }
+  }, [])
 
   const handleCapture = useCallback(async (base64: string) => {
     setCurrentImage(base64)
     setStep('processing')
     setProcessingError(null)
     try {
-      const data = await extractReceiptData(base64)
+      const data = await extractReceiptWithClaude(base64)
       setCurrentData(data)
       setStep('form')
     } catch (err) {
@@ -53,20 +62,18 @@ export default function App() {
     setIsSubmitting(true)
 
     try {
-      const result = await submitExpenseToXero(expense)
+      const purchaseId = await submitExpenseToXero(data)
       setExpenses(prev =>
-        prev.map(e =>
-          e.id === expense.id
-            ? { ...e, status: 'synced', xeroPurchaseId: result.purchaseId, syncedAt: new Date().toISOString() }
-            : e
+        prev.map(e => e.id === expense.id
+          ? { ...e, status: 'synced', xeroPurchaseId: purchaseId, syncedAt: new Date().toISOString() }
+          : e
         )
       )
     } catch (err) {
       setExpenses(prev =>
-        prev.map(e =>
-          e.id === expense.id
-            ? { ...e, status: 'error', errorMessage: err instanceof Error ? err.message : 'Sync failed' }
-            : e
+        prev.map(e => e.id === expense.id
+          ? { ...e, status: 'error', errorMessage: err instanceof Error ? err.message : 'Sync failed' }
+          : e
         )
       )
     } finally {
@@ -106,13 +113,15 @@ export default function App() {
 
       {/* Content */}
       <main className="flex-1 px-4 py-6 overflow-y-auto">
+
+        {/* ── Capture tab ─────────────────────────────────────────────────── */}
         {tab === 'capture' && (
           <div className="flex flex-col items-center gap-6">
             {step === 'camera' && (
               <>
                 <div className="text-center">
                   <h2 className="text-xl font-bold text-gray-900">Capture Receipt</h2>
-                  <p className="text-sm text-gray-500 mt-1">Take a photo or upload — AI will extract the details</p>
+                  <p className="text-sm text-gray-500 mt-1">Take a photo or upload — AI extracts the details</p>
                 </div>
                 {processingError && (
                   <div className="w-full max-w-sm px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
@@ -144,7 +153,7 @@ export default function App() {
               <>
                 <div className="w-full text-center">
                   <h2 className="text-xl font-bold text-gray-900">Review & Edit</h2>
-                  <p className="text-sm text-gray-500 mt-1">Check the extracted details before sending</p>
+                  <p className="text-sm text-gray-500 mt-1">Check the details before sending to Xero</p>
                 </div>
                 {currentImage && (
                   <img
@@ -166,6 +175,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ── History tab ──────────────────────────────────────────────────── */}
         {tab === 'history' && (
           <div className="flex flex-col gap-4">
             <h2 className="text-xl font-bold text-gray-900">Expense History</h2>
@@ -173,33 +183,67 @@ export default function App() {
           </div>
         )}
 
+        {/* ── Settings tab ─────────────────────────────────────────────────── */}
         {tab === 'settings' && (
           <div className="flex flex-col gap-6">
             <h2 className="text-xl font-bold text-gray-900">Settings</h2>
+
+            {/* Xero */}
             <section className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Xero</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Xero</h3>
               <XeroConnect />
             </section>
+
+            {/* Claude AI */}
             <section className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Data</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">AI — Receipt Scanning</h3>
+              <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-3">
+                <p className="text-sm text-gray-600">
+                  Enter your Anthropic API key to enable AI receipt scanning.
+                  Get one free at{' '}
+                  <span className="font-semibold text-[#13B5EA]">console.anthropic.com</span>
+                </p>
+                <input
+                  type="password"
+                  value={anthropicKey}
+                  onChange={e => {
+                    setAnthropicKeyState(e.target.value)
+                    setAnthropicKey(e.target.value)
+                    localStorage.setItem(ANTHROPIC_KEY_STORAGE, e.target.value)
+                  }}
+                  placeholder="sk-ant-..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#13B5EA]"
+                />
+                {anthropicKey && (
+                  <p className="text-xs text-green-600 font-medium">✓ API key saved locally</p>
+                )}
+              </div>
+            </section>
+
+            {/* Data */}
+            <section className="flex flex-col gap-3">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Data</h3>
               <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between">
                 <div>
                   <p className="font-medium text-gray-900">Total expenses</p>
                   <p className="text-sm text-gray-500">{expenses.length} recorded</p>
                 </div>
                 <button
-                  onClick={() => { if (confirm('Delete all expenses? This cannot be undone.')) setExpenses([]) }}
+                  onClick={() => { if (confirm('Delete all local expenses? This cannot be undone.')) setExpenses([]) }}
                   className="text-sm text-red-500 hover:text-red-700 font-medium"
                 >
                   Clear all
                 </button>
               </div>
             </section>
+
+            {/* About */}
             <section className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">About</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">About</h3>
               <div className="bg-white rounded-2xl border border-gray-200 p-4 text-sm text-gray-500 space-y-1">
                 <p>Receipt Expense Tracker v1.0</p>
                 <p>Blugraph · {new Date().getFullYear()}</p>
+                <p className="text-xs pt-1 text-gray-400">All data stored locally on this device</p>
               </div>
             </section>
           </div>
@@ -210,19 +254,15 @@ export default function App() {
       <nav className="bg-white border-t border-gray-200 px-4 py-2 sticky bottom-0 z-20">
         <div className="flex">
           {([
-            { id: 'capture',  icon: Receipt,  label: 'Capture' },
-            { id: 'history',  icon: List,     label: 'History' },
+            { id: 'capture',  icon: Receipt,  label: 'Capture'  },
+            { id: 'history',  icon: List,     label: 'History'  },
             { id: 'settings', icon: Settings, label: 'Settings' },
           ] as const).map(({ id, icon: Icon, label }) => (
             <button
               key={id}
               onClick={() => {
                 setTab(id)
-                if (id === 'capture') {
-                  setStep('camera')
-                  setCurrentImage(null)
-                  setCurrentData(null)
-                }
+                if (id === 'capture') { setStep('camera'); setCurrentImage(null); setCurrentData(null) }
               }}
               className={`flex-1 flex flex-col items-center gap-1 py-2 transition-colors ${
                 tab === id ? 'text-[#13B5EA]' : 'text-gray-400 hover:text-gray-600'
