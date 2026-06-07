@@ -1,0 +1,6 @@
+name = "xero-token-proxy"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+# Non-secret config — secrets are set via: wrangler secret put XERO_CLIENT_ID
