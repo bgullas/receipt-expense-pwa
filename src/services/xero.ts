@@ -11,7 +11,17 @@ const XERO_AUTH_BASE = 'https://login.xero.com/identity/connect/authorize'
 const XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 const XERO_CONN_URL  = 'https://api.xero.com/connections'
 const XERO_API       = 'https://api.xero.com/api.xro/2.0'
-const SCOPES = 'openid profile email accounting.transactions accounting.contacts offline_access'
+// New granular scopes (required for apps created after 2 March 2026)
+const SCOPES = [
+  'openid',
+  'profile',
+  'email',
+  'offline_access',
+  'accounting.settings',       // read chart of accounts
+  'accounting.contacts',       // create / find vendors
+  'accounting.banktransactions', // create spend (expense) transactions
+  'accounting.attachments',    // attach receipt images to transactions
+].join(' ')
 
 // Hardcoded to avoid any dynamic-construction mismatches.
 // Must match EXACTLY what is registered in developer.xero.com → your app → Redirect URIs.
