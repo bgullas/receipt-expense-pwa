@@ -12,11 +12,13 @@ const XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 const XERO_CONN_URL  = 'https://api.xero.com/connections'
 const XERO_API       = 'https://api.xero.com/api.xro/2.0'
 // New granular scopes (required for apps created after 2 March 2026)
+// app.connections is required for all new Xero apps
 const SCOPES = [
   'openid',
   'profile',
   'email',
   'offline_access',
+  'app.connections',           // required for new apps
   'accounting.settings',       // read chart of accounts
   'accounting.contacts',       // create / find vendors
   'accounting.banktransactions', // create spend (expense) transactions
